@@ -77,6 +77,7 @@ export default function StoryEditor() {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognition) {
+        console.log('初始化语音识别');
         recognitionRef.current = new SpeechRecognition();
         recognitionRef.current.continuous = true;
         recognitionRef.current.interimResults = true;
@@ -86,10 +87,12 @@ export default function StoryEditor() {
           console.log('语音识别已启动');
           toast.success('开始录音');
           setIsRecording(true);
+          setInput(''); // 清空输入框
           
           try {
             // 获取麦克风权限并开始音频可视化
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            console.log('获取到麦克风权限');
             mediaStreamRef.current = stream;
             
             // 创建音频上下文
@@ -112,7 +115,9 @@ export default function StoryEditor() {
               
               // 计算音量级别（0-100）
               const average = dataArray.reduce((acc, value) => acc + value, 0) / dataArray.length;
-              setAudioLevel(Math.min(100, (average / 128) * 100));
+              const level = Math.min(100, (average / 128) * 100);
+              console.log('音量级别:', level);
+              setAudioLevel(level);
               
               animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
             };
@@ -125,6 +130,7 @@ export default function StoryEditor() {
         };
 
         recognitionRef.current.onresult = (event: any) => {
+          console.log('收到语音识别结果');
           const results = event.results;
           let finalTranscript = '';
           let interimTranscript = '';
@@ -132,22 +138,27 @@ export default function StoryEditor() {
           for (let i = event.resultIndex; i < results.length; i++) {
             const transcript = results[i][0].transcript;
             if (results[i].isFinal) {
+              console.log('最终识别结果:', transcript);
               finalTranscript += transcript;
             } else {
+              console.log('临时识别结果:', transcript);
               interimTranscript += transcript;
             }
           }
 
           // 更新输入框
           if (finalTranscript) {
-            setInput(prev => prev + finalTranscript);
+            console.log('更新输入框:', finalTranscript);
+            setInput(prev => {
+              const newValue = prev + finalTranscript;
+              console.log('新的输入框内容:', newValue);
+              return newValue;
+            });
           }
-          
-          console.log('识别结果:', { final: finalTranscript, interim: interimTranscript });
         };
 
         recognitionRef.current.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
+          console.error('语音识别错误:', event.error);
           stopRecording();
           
           switch(event.error) {
@@ -161,7 +172,7 @@ export default function StoryEditor() {
               toast.error('网络错误，请检查网络连接');
               break;
             default:
-              toast.error('语音识别出错，请重试');
+              toast.error(`语音识别出错: ${event.error}`);
           }
         };
 
@@ -169,6 +180,9 @@ export default function StoryEditor() {
           console.log('语音识别已结束');
           stopRecording();
         };
+      } else {
+        console.error('浏览器不支持语音识别');
+        toast.error('您的浏览器不支持语音识别功能');
       }
     }
 
@@ -178,27 +192,43 @@ export default function StoryEditor() {
   }, []);
 
   const stopRecording = () => {
+    console.log('停止录音');
     setIsRecording(false);
+    
+    // 停止语音识别
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        console.error('停止语音识别时出错:', error);
+      }
+    }
     
     // 停止音频可视化
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
     
     // 停止麦克风
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        console.log('麦克风轨道已停止');
+      });
+      mediaStreamRef.current = null;
     }
     
     // 关闭音频上下文
     if (audioContextRef.current) {
-      audioContextRef.current.close();
+      audioContextRef.current.close().then(() => {
+        console.log('音频上下文已关闭');
+      });
+      audioContextRef.current = null;
     }
     
     // 重置状态
     setAudioLevel(0);
-    mediaStreamRef.current = null;
-    audioContextRef.current = null;
     analyserRef.current = null;
   };
 
@@ -210,9 +240,11 @@ export default function StoryEditor() {
 
     try {
       if (isRecording) {
+        console.log('停止录音...');
         recognitionRef.current.stop();
         stopRecording();
       } else {
+        console.log('开始录音...');
         recognitionRef.current.start();
       }
     } catch (error) {
