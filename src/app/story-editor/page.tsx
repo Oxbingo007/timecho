@@ -76,23 +76,50 @@ export default function StoryEditor() {
         recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'zh-CN';
 
+        recognitionRef.current.onstart = () => {
+          console.log('语音识别已启动');
+          toast.success('开始录音');
+          setIsRecording(true);
+        };
+
         recognitionRef.current.onresult = (event: any) => {
           const transcript = Array.from(event.results)
             .map((result: any) => result[0])
             .map((result) => result.transcript)
             .join('');
-          setInput(transcript);
+          
+          console.log('识别结果:', transcript);
+          setInput((prev) => prev + transcript);
         };
 
         recognitionRef.current.onerror = (event: any) => {
           console.error('Speech recognition error:', event.error);
           setIsRecording(false);
-          toast.error('语音识别出错，请重试');
+          
+          switch(event.error) {
+            case 'not-allowed':
+              toast.error('请允许使用麦克风权限');
+              break;
+            case 'no-speech':
+              toast.error('没有检测到语音，请重试');
+              break;
+            case 'network':
+              toast.error('网络错误，请检查网络连接');
+              break;
+            default:
+              toast.error('语音识别出错，请重试');
+          }
         };
 
         recognitionRef.current.onend = () => {
+          console.log('语音识别已结束');
           setIsRecording(false);
+          if (recognitionRef.current) {
+            recognitionRef.current.stop();
+          }
         };
+      } else {
+        console.error('浏览器不支持语音识别');
       }
     }
   }, []);
@@ -104,13 +131,16 @@ export default function StoryEditor() {
       return;
     }
 
-    if (isRecording) {
-      recognitionRef.current.stop();
+    try {
+      if (isRecording) {
+        recognitionRef.current.stop();
+      } else {
+        recognitionRef.current.start();
+      }
+    } catch (error) {
+      console.error('语音识别错误:', error);
+      toast.error('启动语音识别失败，请重试');
       setIsRecording(false);
-    } else {
-      setInput('');
-      recognitionRef.current.start();
-      setIsRecording(true);
     }
   };
 
@@ -324,7 +354,7 @@ export default function StoryEditor() {
         </div>
       </div>
 
-      <div className="flex-1 flex gap-4">
+      <div className="flex-1 flex flex-col md:flex-row gap-4">
         {/* 主聊天区域 */}
         <div className="flex-1 flex flex-col">
           <Card className="flex-1 p-4 mb-4 overflow-y-auto">
@@ -351,7 +381,7 @@ export default function StoryEditor() {
             </div>
           </Card>
 
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -362,22 +392,25 @@ export default function StoryEditor() {
                 }
               }}
               placeholder="输入您的故事..."
-              className="flex-1 resize-none"
+              className="flex-1 resize-none min-h-[80px] sm:min-h-0"
               disabled={isLoading || isRecording}
             />
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-row sm:flex-col gap-2">
               <Button
                 variant={isRecording ? "destructive" : "outline"}
                 onClick={toggleRecording}
                 disabled={isLoading}
+                className="flex-1 sm:flex-none"
               >
-                <Mic className="w-4 h-4 mr-2" />
+                {isRecording ? <MicOff className="w-4 h-4 mr-2" /> : <Mic className="w-4 h-4 mr-2" />}
                 {isRecording ? "停止录音" : "语音输入"}
               </Button>
               <Button
                 onClick={sendMessage}
                 disabled={isLoading || !input.trim()}
+                className="flex-1 sm:flex-none"
               >
+                <Send className="w-4 h-4 mr-2" />
                 发送
               </Button>
             </div>
@@ -388,7 +421,7 @@ export default function StoryEditor() {
         <Collapsible
           open={showRecords}
           onOpenChange={setShowRecords}
-          className="w-80 shrink-0"
+          className="w-full md:w-80 shrink-0"
         >
           <Card className="p-4">
             <CollapsibleTrigger asChild>
