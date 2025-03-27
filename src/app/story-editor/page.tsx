@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Download, Send, Mic, MicOff, MessageSquare, History, ChevronDown, ChevronUp, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Textarea } from '@/components/ui/textarea'
+import { Progress } from '@/components/ui/progress'
 import { chatWithAI } from '@/lib/ai-services'
 import { Message, AIModel } from '@/lib/types'
 import {
@@ -54,6 +55,11 @@ export default function StoryEditor() {
   const [records, setRecords] = useState<InterviewRecord[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
+  const [audioLevel, setAudioLevel] = useState(0)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
 
   // 初始化消息
   useEffect(() => {
@@ -76,25 +82,73 @@ export default function StoryEditor() {
         recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'zh-CN';
 
-        recognitionRef.current.onstart = () => {
+        recognitionRef.current.onstart = async () => {
           console.log('语音识别已启动');
           toast.success('开始录音');
           setIsRecording(true);
+          
+          try {
+            // 获取麦克风权限并开始音频可视化
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStreamRef.current = stream;
+            
+            // 创建音频上下文
+            const audioContext = new AudioContext();
+            const analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(stream);
+            
+            source.connect(analyser);
+            analyser.fftSize = 256;
+            
+            audioContextRef.current = audioContext;
+            analyserRef.current = analyser;
+            
+            // 开始音频可视化
+            const updateAudioLevel = () => {
+              if (!analyserRef.current || !isRecording) return;
+              
+              const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+              analyserRef.current.getByteFrequencyData(dataArray);
+              
+              // 计算音量级别（0-100）
+              const average = dataArray.reduce((acc, value) => acc + value, 0) / dataArray.length;
+              setAudioLevel(Math.min(100, (average / 128) * 100));
+              
+              animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
+            };
+            
+            updateAudioLevel();
+          } catch (error) {
+            console.error('获取麦克风权限失败:', error);
+            toast.error('无法访问麦克风');
+          }
         };
 
         recognitionRef.current.onresult = (event: any) => {
-          const transcript = Array.from(event.results)
-            .map((result: any) => result[0])
-            .map((result) => result.transcript)
-            .join('');
+          const results = event.results;
+          let finalTranscript = '';
+          let interimTranscript = '';
+
+          for (let i = event.resultIndex; i < results.length; i++) {
+            const transcript = results[i][0].transcript;
+            if (results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          // 更新输入框
+          if (finalTranscript) {
+            setInput(prev => prev + finalTranscript);
+          }
           
-          console.log('识别结果:', transcript);
-          setInput((prev) => prev + transcript);
+          console.log('识别结果:', { final: finalTranscript, interim: interimTranscript });
         };
 
         recognitionRef.current.onerror = (event: any) => {
           console.error('Speech recognition error:', event.error);
-          setIsRecording(false);
+          stopRecording();
           
           switch(event.error) {
             case 'not-allowed':
@@ -113,18 +167,41 @@ export default function StoryEditor() {
 
         recognitionRef.current.onend = () => {
           console.log('语音识别已结束');
-          setIsRecording(false);
-          if (recognitionRef.current) {
-            recognitionRef.current.stop();
-          }
+          stopRecording();
         };
-      } else {
-        console.error('浏览器不支持语音识别');
       }
     }
+
+    return () => {
+      stopRecording();
+    };
   }, []);
 
-  // 切换语音识别
+  const stopRecording = () => {
+    setIsRecording(false);
+    
+    // 停止音频可视化
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    
+    // 停止麦克风
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    // 关闭音频上下文
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+    }
+    
+    // 重置状态
+    setAudioLevel(0);
+    mediaStreamRef.current = null;
+    audioContextRef.current = null;
+    analyserRef.current = null;
+  };
+
   const toggleRecording = () => {
     if (!recognitionRef.current) {
       toast.error('您的浏览器不支持语音识别功能');
@@ -134,13 +211,14 @@ export default function StoryEditor() {
     try {
       if (isRecording) {
         recognitionRef.current.stop();
+        stopRecording();
       } else {
         recognitionRef.current.start();
       }
     } catch (error) {
       console.error('语音识别错误:', error);
       toast.error('启动语音识别失败，请重试');
-      setIsRecording(false);
+      stopRecording();
     }
   };
 
@@ -382,28 +460,44 @@ export default function StoryEditor() {
           </Card>
 
           <div className="flex flex-col sm:flex-row gap-2">
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  sendMessage()
-                }
-              }}
-              placeholder="输入您的故事..."
-              className="flex-1 resize-none min-h-[80px] sm:min-h-0"
-              disabled={isLoading || isRecording}
-            />
+            <div className="flex-1 relative">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    sendMessage()
+                  }
+                }}
+                placeholder="输入您的故事..."
+                className="flex-1 resize-none min-h-[80px] sm:min-h-0"
+                disabled={isLoading || isRecording}
+              />
+              {isRecording && (
+                <div className="absolute left-0 right-0 bottom-0">
+                  <Progress value={audioLevel} className="h-1" />
+                </div>
+              )}
+            </div>
             <div className="flex flex-row sm:flex-col gap-2">
               <Button
                 variant={isRecording ? "destructive" : "outline"}
                 onClick={toggleRecording}
                 disabled={isLoading}
-                className="flex-1 sm:flex-none"
+                className="flex-1 sm:flex-none relative"
               >
-                {isRecording ? <MicOff className="w-4 h-4 mr-2" /> : <Mic className="w-4 h-4 mr-2" />}
-                {isRecording ? "停止录音" : "语音输入"}
+                {isRecording ? (
+                  <>
+                    <MicOff className="w-4 h-4 mr-2" />
+                    停止录音
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-4 h-4 mr-2" />
+                    语音输入
+                  </>
+                )}
               </Button>
               <Button
                 onClick={sendMessage}
