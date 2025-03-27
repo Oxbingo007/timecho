@@ -1,4 +1,4 @@
-export type AIModel = 'gpt3.5' | 'gpt4' | 'deepseek' | 'qianwen';
+export type AIModel = 'openai' | 'gpt3.5' | 'gpt4' | 'deepseek' | 'qianwen';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
