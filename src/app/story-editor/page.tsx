@@ -79,19 +79,26 @@ export default function StoryEditor() {
       if (SpeechRecognition) {
         console.log('初始化语音识别');
         recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = true;
+        recognitionRef.current.continuous = false; // 在移动端设置为 false 可能更稳定
         recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'zh-CN';
+        recognitionRef.current.maxAlternatives = 1;
 
         recognitionRef.current.onstart = async () => {
           console.log('语音识别已启动');
-          toast.success('开始录音');
+          toast.success('开始录音，请说话...');
           setIsRecording(true);
           setInput(''); // 清空输入框
           
           try {
             // 获取麦克风权限并开始音频可视化
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+              } 
+            });
             console.log('获取到麦克风权限');
             mediaStreamRef.current = stream;
             
@@ -125,7 +132,12 @@ export default function StoryEditor() {
             updateAudioLevel();
           } catch (error) {
             console.error('获取麦克风权限失败:', error);
-            toast.error('无法访问麦克风');
+            if (error instanceof DOMException && error.name === 'NotAllowedError') {
+              toast.error('请允许使用麦克风权限，并刷新页面重试');
+            } else {
+              toast.error('无法访问麦克风，请确保设备支持语音输入');
+            }
+            stopRecording();
           }
         };
 
@@ -140,6 +152,14 @@ export default function StoryEditor() {
             if (results[i].isFinal) {
               console.log('最终识别结果:', transcript);
               finalTranscript += transcript;
+              // 在移动端，每次得到最终结果后自动重新开始录音
+              if (!results[i + 1]) {
+                try {
+                  recognitionRef.current?.start();
+                } catch (error) {
+                  console.error('重新启动语音识别失败:', error);
+                }
+              }
             } else {
               console.log('临时识别结果:', transcript);
               interimTranscript += transcript;
@@ -159,37 +179,52 @@ export default function StoryEditor() {
 
         recognitionRef.current.onerror = (event: any) => {
           console.error('语音识别错误:', event.error);
-          stopRecording();
           
           switch(event.error) {
             case 'not-allowed':
-              toast.error('请允许使用麦克风权限');
+              toast.error('请允许使用麦克风权限，并刷新页面重试');
               break;
             case 'no-speech':
               toast.error('没有检测到语音，请重试');
+              // 在移动端，no-speech 错误后自动重新开始
+              try {
+                recognitionRef.current?.start();
+              } catch (error) {
+                console.error('重新启动语音识别失败:', error);
+              }
               break;
             case 'network':
               toast.error('网络错误，请检查网络连接');
               break;
+            case 'aborted':
+              // 忽略中止错误，这通常是用户手动停止的结果
+              break;
             default:
               toast.error(`语音识别出错: ${event.error}`);
+          }
+          
+          if (event.error !== 'no-speech' && event.error !== 'aborted') {
+            stopRecording();
           }
         };
 
         recognitionRef.current.onend = () => {
           console.log('语音识别已结束');
-          stopRecording();
+          // 只有在用户主动停止时才调用 stopRecording
+          if (!isRecording) {
+            stopRecording();
+          }
         };
       } else {
         console.error('浏览器不支持语音识别');
-        toast.error('您的浏览器不支持语音识别功能');
+        toast.error('您的浏览器不支持语音识别功能，请使用 Chrome 浏览器');
       }
     }
 
     return () => {
       stopRecording();
     };
-  }, []);
+  }, [isRecording]); // 添加 isRecording 作为依赖项
 
   const stopRecording = () => {
     console.log('停止录音');
@@ -234,22 +269,33 @@ export default function StoryEditor() {
 
   const toggleRecording = () => {
     if (!recognitionRef.current) {
-      toast.error('您的浏览器不支持语音识别功能');
+      toast.error('您的浏览器不支持语音识别功能，请使用 Chrome 浏览器');
       return;
     }
 
     try {
       if (isRecording) {
         console.log('停止录音...');
-        recognitionRef.current.stop();
         stopRecording();
       } else {
         console.log('开始录音...');
-        recognitionRef.current.start();
+        // 在移动端，每次开始录音前检查和请求权限
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(() => {
+              recognitionRef.current.start();
+            })
+            .catch((error) => {
+              console.error('获取麦克风权限失败:', error);
+              toast.error('请允许使用麦克风权限，并刷新页面重试');
+            });
+        } else {
+          toast.error('您的设备不支持语音输入');
+        }
       }
     } catch (error) {
       console.error('语音识别错误:', error);
-      toast.error('启动语音识别失败，请重试');
+      toast.error('启动语音识别失败，请刷新页面重试');
       stopRecording();
     }
   };
