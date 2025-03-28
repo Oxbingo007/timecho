@@ -151,23 +151,30 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
       throw new Error('通义千问 AccessKey ID 未配置，请在环境变量中设置 NEXT_PUBLIC_QIANWEN_ACCESS_KEY_ID');
     }
 
-    console.log('Sending request to Qianwen API...');
+    console.log('Sending request to Qianwen API with key:', QIANWEN_ACCESS_KEY_ID);
 
     const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation', {
       method: 'POST',
       headers: {
-        'Authorization': QIANWEN_ACCESS_KEY_ID,
+        'Authorization': `Bearer ${QIANWEN_ACCESS_KEY_ID}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         model: 'qwen-turbo',
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...messages.map(msg => ({
-            role: msg.role === 'assistant' ? 'assistant' : 'user',
-            content: msg.content
-          }))
-        ]
+        input: {
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            ...messages.map(msg => ({
+              role: msg.role === 'assistant' ? 'assistant' : 'user',
+              content: msg.content
+            }))
+          ]
+        },
+        parameters: {
+          temperature: 0.7,
+          max_tokens: 1500,
+          result_format: 'message'
+        }
       }),
     });
 
@@ -182,13 +189,13 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
     const data = await response.json();
     console.log('Qianwen API Response Data:', JSON.stringify(data, null, 2));
 
-    if (!data.output?.text) {
+    if (!data.output?.text && !data.output?.message?.content) {
       console.error('Invalid response format from Qianwen:', data);
       throw new Error('通义千问返回了无效的响应格式');
     }
 
     return {
-      content: data.output.text,
+      content: data.output.message?.content || data.output.text,
       model: 'qianwen'
     };
   } catch (error) {
