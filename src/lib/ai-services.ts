@@ -147,8 +147,8 @@ async function chatWithDeepseek(messages: { role: string; content: string }[]): 
 
 async function chatWithQianwen(messages: { role: string; content: string }[]): Promise<AIResponse> {
   try {
-    if (!QIANWEN_ACCESS_KEY_ID || !QIANWEN_ACCESS_KEY_SECRET) {
-      throw new Error('通义千问 AccessKey 未配置，请在环境变量中设置 NEXT_PUBLIC_QIANWEN_ACCESS_KEY_ID 和 NEXT_PUBLIC_QIANWEN_ACCESS_KEY_SECRET');
+    if (!QIANWEN_ACCESS_KEY_ID) {
+      throw new Error('通义千问 AccessKey ID 未配置，请在环境变量中设置 NEXT_PUBLIC_QIANWEN_ACCESS_KEY_ID');
     }
 
     console.log('Sending request to Qianwen API...');
@@ -156,7 +156,7 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
     const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${QIANWEN_ACCESS_KEY_ID}:${QIANWEN_ACCESS_KEY_SECRET}`,
+        'Authorization': `Bearer ${QIANWEN_ACCESS_KEY_ID}`,
         'Content-Type': 'application/json',
         'X-DashScope-Plugin': 'history',
       },
