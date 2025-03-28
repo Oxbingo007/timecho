@@ -156,25 +156,18 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
     const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${QIANWEN_ACCESS_KEY_ID}`,
+        'Authorization': QIANWEN_ACCESS_KEY_ID,
         'Content-Type': 'application/json',
-        'X-DashScope-Plugin': 'history',
       },
       body: JSON.stringify({
-        model: 'qwen-max',
-        input: {
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            ...messages.map(msg => ({
-              role: msg.role as "user" | "assistant",
-              content: msg.content
-            }))
-          ]
-        },
-        parameters: {
-          temperature: 0.7,
-          max_tokens: 1000,
-        },
+        model: 'qwen-turbo',
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          ...messages.map(msg => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content
+          }))
+        ]
       }),
     });
 
