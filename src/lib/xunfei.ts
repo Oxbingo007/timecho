@@ -5,6 +5,20 @@ interface XunfeiConfig {
   apiKey: string
 }
 
+interface XunfeiResponse {
+  code: number
+  message?: string
+  data?: {
+    result?: {
+      ws: Array<{
+        cw: Array<{
+          w: string
+        }>
+      }>
+    }
+  }
+}
+
 export class XunfeiASR {
   private appId: string
   private apiKey: string
@@ -17,6 +31,7 @@ export class XunfeiASR {
   private onLevelChange?: (level: number) => void
   private onResult?: (text: string) => void
   private onError?: (error: Error) => void
+  private animationFrame: number | null = null
 
   constructor(config: XunfeiConfig) {
     this.appId = config.appId
@@ -59,7 +74,19 @@ export class XunfeiASR {
         'audio/ogg;codecs=opus'
       ]
       
-      const supportedType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type))
+      // 确保 MediaRecorder 在浏览器中可用
+      if (typeof MediaRecorder === 'undefined') {
+        throw new Error('您的浏览器不支持 MediaRecorder API')
+      }
+      
+      const supportedType = mimeTypes.find(type => {
+        try {
+          return MediaRecorder.isTypeSupported(type)
+        } catch (e) {
+          return false
+        }
+      })
+
       if (!supportedType) {
         throw new Error('浏览器不支持任何可用的音频格式')
       }
@@ -88,7 +115,13 @@ export class XunfeiASR {
   // 开始音频可视化
   private startVisualization() {
     const updateLevel = () => {
-      if (!this.analyser || !this.isRecording) return
+      if (!this.analyser || !this.isRecording) {
+        if (this.animationFrame) {
+          cancelAnimationFrame(this.animationFrame)
+          this.animationFrame = null
+        }
+        return
+      }
 
       const dataArray = new Uint8Array(this.analyser.frequencyBinCount)
       this.analyser.getByteFrequencyData(dataArray)
@@ -97,10 +130,10 @@ export class XunfeiASR {
       const level = Math.min(100, (average / 128) * 100)
       
       this.onLevelChange?.(level)
-      requestAnimationFrame(updateLevel)
+      this.animationFrame = requestAnimationFrame(updateLevel)
     }
 
-    updateLevel()
+    this.animationFrame = requestAnimationFrame(updateLevel)
   }
 
   // 开始录音
@@ -134,7 +167,9 @@ export class XunfeiASR {
           }
         }
 
-        this.ws.send(JSON.stringify(params))
+        if (this.ws) {
+          this.ws.send(JSON.stringify(params))
+        }
 
         // 开始录音
         if (this.mediaRecorder) {
@@ -144,19 +179,24 @@ export class XunfeiASR {
       }
 
       this.ws.onmessage = (event) => {
-        const result = JSON.parse(event.data)
-        
-        if (result.code !== 0) {
-          this.onError?.(new Error(result.message || '语音识别失败'))
-          return
-        }
-
-        if (result.data && result.data.result) {
-          const text = result.data.result.ws
-            .map((ws: any) => ws.cw.map((cw: any) => cw.w).join(''))
-            .join('')
+        try {
+          const result = JSON.parse(event.data) as XunfeiResponse
           
-          this.onResult?.(text)
+          if (result.code !== 0) {
+            this.onError?.(new Error(result.message || '语音识别失败'))
+            return
+          }
+
+          if (result.data?.result?.ws) {
+            const text = result.data.result.ws
+              .map(ws => ws.cw.map(cw => cw.w).join(''))
+              .join('')
+            
+            this.onResult?.(text)
+          }
+        } catch (error) {
+          console.error('解析识别结果失败:', error)
+          this.onError?.(new Error('解析识别结果失败'))
         }
       }
 
@@ -181,6 +221,12 @@ export class XunfeiASR {
   // 停止录音
   stopRecording() {
     this.isRecording = false
+
+    // 停止动画帧
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame)
+      this.animationFrame = null
+    }
 
     // 停止 MediaRecorder
     if (this.mediaRecorder?.state === 'recording') {
