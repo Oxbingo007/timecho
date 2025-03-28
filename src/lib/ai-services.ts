@@ -66,8 +66,8 @@ async function chatWithOpenAI(messages: { role: string; content: string }[], mod
     if (error.code === 'invalid_api_key') {
       throw new Error('OpenAI API Key 无效');
     }
-    if (error.code === 'insufficient_quota') {
-      throw new Error('OpenAI API 配额不足');
+    if (error.code === 'insufficient_quota' || (error.message && error.message.includes('insufficient_quota'))) {
+      throw new Error('OpenAI API 余额不足。虽然 GPT-3.5 价格较低，但仍需要付费使用。建议：1) 充值 OpenAI API 额度，或 2) 切换到 DeepSeek 模型继续对话');
     }
     if (error.code === 'rate_limit_exceeded') {
       throw new Error('OpenAI API 请求过于频繁，请稍后重试');
