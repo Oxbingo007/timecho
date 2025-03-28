@@ -26,6 +26,9 @@ const SYSTEM_PROMPT = `你是一位专业的生命故事访谈员，你的任务
 - 提出相关的追问，帮助挖掘更多细节
 - 保持对话的自然流畅性`;
 
+const QIANWEN_ACCESS_KEY_ID = process.env.NEXT_PUBLIC_QIANWEN_ACCESS_KEY_ID;
+const QIANWEN_ACCESS_KEY_SECRET = process.env.NEXT_PUBLIC_QIANWEN_ACCESS_KEY_SECRET;
+
 async function chatWithOpenAI(messages: { role: string; content: string }[], modelName: string = 'gpt-4-turbo-preview'): Promise<AIResponse> {
   try {
     if (!process.env.NEXT_PUBLIC_OPENAI_API_KEY) {
@@ -144,10 +147,16 @@ async function chatWithDeepseek(messages: { role: string; content: string }[]): 
 
 async function chatWithQianwen(messages: { role: string; content: string }[]): Promise<AIResponse> {
   try {
+    if (!QIANWEN_ACCESS_KEY_ID || !QIANWEN_ACCESS_KEY_SECRET) {
+      throw new Error('通义千问 AccessKey 未配置，请在环境变量中设置 NEXT_PUBLIC_QIANWEN_ACCESS_KEY_ID 和 NEXT_PUBLIC_QIANWEN_ACCESS_KEY_SECRET');
+    }
+
+    console.log('Sending request to Qianwen API...');
+
     const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_QIANWEN_API_KEY}`,
+        'Authorization': `Bearer ${QIANWEN_ACCESS_KEY_ID}:${QIANWEN_ACCESS_KEY_SECRET}`,
         'Content-Type': 'application/json',
         'X-DashScope-Plugin': 'history',
       },
@@ -169,17 +178,31 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
       }),
     });
 
+    console.log('Qianwen API Response Status:', response.status);
+
     if (!response.ok) {
-      throw new Error(`Qianwen API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Qianwen API Error Response:', errorText);
+      throw new Error(`通义千问 API 错误: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log('Qianwen API Response Data:', JSON.stringify(data, null, 2));
+
+    if (!data.output?.text) {
+      console.error('Invalid response format from Qianwen:', data);
+      throw new Error('通义千问返回了无效的响应格式');
+    }
+
     return {
-      content: data.output.text || '抱歉，我现在无法回答。',
+      content: data.output.text,
       model: 'qianwen'
     };
   } catch (error) {
     console.error('Qianwen API error:', error);
+    if (error instanceof Error) {
+      throw new Error(`通义千问响应失败: ${error.message}`);
+    }
     throw new Error('通义千问响应失败，请重试');
   }
 }
