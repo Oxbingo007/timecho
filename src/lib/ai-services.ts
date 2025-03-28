@@ -23,10 +23,10 @@ const SYSTEM_PROMPT = `你是一位专业的生命故事访谈员，你的任务
 - 提出相关的追问，帮助挖掘更多细节
 - 保持对话的自然流畅性`;
 
-async function chatWithOpenAI(messages: { role: string; content: string }[]): Promise<AIResponse> {
+async function chatWithOpenAI(messages: { role: string; content: string }[], modelName: string = 'gpt-4-turbo-preview'): Promise<AIResponse> {
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
+      model: modelName,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...messages.map(msg => ({
@@ -50,6 +50,14 @@ async function chatWithOpenAI(messages: { role: string; content: string }[]): Pr
 
 async function chatWithDeepseek(messages: { role: string; content: string }[]): Promise<AIResponse> {
   try {
+    if (!DEEPSEEK_API_KEY) {
+      throw new Error('Deepseek API Key 未配置，请在环境变量中设置 NEXT_PUBLIC_DEEPSEEK_API_KEY');
+    }
+
+    console.log('Sending request to Deepseek API...');
+    console.log('API URL:', DEEPSEEK_API_URL);
+    console.log('Messages:', JSON.stringify(messages, null, 2));
+
     const response = await fetch(DEEPSEEK_API_URL, {
       method: 'POST',
       headers: {
@@ -70,17 +78,31 @@ async function chatWithDeepseek(messages: { role: string; content: string }[]): 
       }),
     });
 
+    console.log('Deepseek API Response Status:', response.status);
+    
     if (!response.ok) {
-      throw new Error(`Deepseek API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Deepseek API Error Response:', errorText);
+      throw new Error(`Deepseek API 错误: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log('Deepseek API Response Data:', JSON.stringify(data, null, 2));
+
+    if (!data.choices?.[0]?.message?.content) {
+      console.error('Invalid response format from Deepseek:', data);
+      throw new Error('Deepseek 返回了无效的响应格式');
+    }
+
     return {
-      content: data.choices[0].message.content || '抱歉，我现在无法回答。',
+      content: data.choices[0].message.content,
       model: 'deepseek'
     };
   } catch (error) {
     console.error('Deepseek API error:', error);
+    if (error instanceof Error) {
+      throw new Error(`Deepseek 响应失败: ${error.message}`);
+    }
     throw new Error('Deepseek 响应失败，请重试');
   }
 }
@@ -132,6 +154,8 @@ export async function chatWithAI(
   model: AIModel
 ): Promise<AIResponse> {
   switch (model) {
+    case 'gpt3.5':
+      return chatWithOpenAI(messages, 'gpt-3.5-turbo');
     case 'openai':
       return chatWithOpenAI(messages);
     case 'deepseek':

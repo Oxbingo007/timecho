@@ -286,6 +286,11 @@ export default function StoryEditor() {
     setIsLoading(true)
 
     try {
+      console.log('Sending message:', {
+        messages: [...messages, userMessage],
+        model: selectedModel
+      });
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -297,11 +302,16 @@ export default function StoryEditor() {
         }),
       })
 
+      const data = await response.json()
+
       if (!response.ok) {
-        throw new Error('发送消息失败')
+        throw new Error(data.error || '发送消息失败')
       }
 
-      const data = await response.json()
+      if (!data.message) {
+        throw new Error('服务器返回了无效的响应格式')
+      }
+
       const assistantMessage: Message = {
         role: 'assistant',
         content: data.message
@@ -322,8 +332,11 @@ export default function StoryEditor() {
       localStorage.setItem('interviewRecords', JSON.stringify(updatedRecords))
 
     } catch (error) {
-      console.error('Error:', error)
-      toast.error('发送消息失败')
+      console.error('Message error:', error)
+      const errorMessage = error instanceof Error ? error.message : '发送消息失败'
+      toast.error(errorMessage)
+      // 移除失败的消息
+      setMessages(prev => prev.slice(0, -1))
     } finally {
       setIsLoading(false)
     }
