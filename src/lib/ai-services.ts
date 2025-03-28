@@ -2,8 +2,11 @@ import OpenAI from 'openai';
 import { AIModel, AIResponse } from './types';
 
 const openai = new OpenAI({
-  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true
+  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY || '',
+  dangerouslyAllowBrowser: true,
+  defaultHeaders: {
+    'Content-Type': 'application/json',
+  }
 });
 
 const DEEPSEEK_API_KEY = process.env.NEXT_PUBLIC_DEEPSEEK_API_KEY;
@@ -25,6 +28,15 @@ const SYSTEM_PROMPT = `你是一位专业的生命故事访谈员，你的任务
 
 async function chatWithOpenAI(messages: { role: string; content: string }[], modelName: string = 'gpt-4-turbo-preview'): Promise<AIResponse> {
   try {
+    if (!process.env.NEXT_PUBLIC_OPENAI_API_KEY) {
+      throw new Error('OpenAI API Key 未配置');
+    }
+
+    console.log('Sending request to OpenAI...', {
+      model: modelName,
+      messagesCount: messages.length
+    });
+
     const completion = await openai.chat.completions.create({
       model: modelName,
       messages: [
@@ -38,13 +50,36 @@ async function chatWithOpenAI(messages: { role: string; content: string }[], mod
       max_tokens: 1000,
     });
 
+    if (!completion.choices[0]?.message?.content) {
+      console.error('Invalid OpenAI response:', completion);
+      throw new Error('OpenAI 返回了无效的响应格式');
+    }
+
     return {
-      content: completion.choices[0].message.content || '抱歉，我现在无法回答。',
+      content: completion.choices[0].message.content,
       model: 'openai'
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('OpenAI API error:', error);
-    throw new Error('OpenAI 响应失败，请重试');
+    
+    // 处理特定的 OpenAI 错误
+    if (error.code === 'invalid_api_key') {
+      throw new Error('OpenAI API Key 无效');
+    }
+    if (error.code === 'insufficient_quota') {
+      throw new Error('OpenAI API 配额不足');
+    }
+    if (error.code === 'rate_limit_exceeded') {
+      throw new Error('OpenAI API 请求过于频繁，请稍后重试');
+    }
+
+    // 如果是 OpenAI 的错误对象，提取详细信息
+    if (error.response?.data?.error) {
+      const apiError = error.response.data.error;
+      throw new Error(`OpenAI 错误: ${apiError.message || apiError.type}`);
+    }
+
+    throw new Error(error.message || 'OpenAI 响应失败，请重试');
   }
 }
 
@@ -155,9 +190,9 @@ export async function chatWithAI(
 ): Promise<AIResponse> {
   switch (model) {
     case 'gpt3.5':
-      return chatWithOpenAI(messages, 'gpt-3.5-turbo');
+      return chatWithOpenAI(messages, 'gpt-3.5-turbo-0125');
     case 'openai':
-      return chatWithOpenAI(messages);
+      return chatWithOpenAI(messages, 'gpt-4-turbo-preview');
     case 'deepseek':
       return chatWithDeepseek(messages);
     case 'qianwen':
