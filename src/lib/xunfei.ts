@@ -51,9 +51,22 @@ export class XunfeiASR {
       source.connect(this.analyser)
       this.analyser.fftSize = 256
 
+      // 检查支持的音频格式
+      const mimeTypes = [
+        'audio/wav',
+        'audio/webm',
+        'audio/webm;codecs=pcm',
+        'audio/ogg;codecs=opus'
+      ]
+      
+      const supportedType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type))
+      if (!supportedType) {
+        throw new Error('浏览器不支持任何可用的音频格式')
+      }
+
       // 创建 MediaRecorder
       this.mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=pcm'
+        mimeType: supportedType
       })
 
       // 处理音频数据
