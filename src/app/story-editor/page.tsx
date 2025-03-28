@@ -21,6 +21,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { XunfeiASR } from '@/lib/xunfei'
 
 const AI_MODELS = [
   { id: 'gpt3.5', name: 'GPT-3.5', description: 'OpenAI GPT-3.5 Turbo' },
@@ -56,10 +57,13 @@ export default function StoryEditor() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
   const [audioLevel, setAudioLevel] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const xunfeiRef = useRef<XunfeiASR | null>(null)
 
   // 初始化消息
   useEffect(() => {
@@ -72,171 +76,104 @@ export default function StoryEditor() {
     ]);
   }, []);
 
-  // 初始化语音识别
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        console.log('初始化语音识别');
-        recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = false; // 在移动端设置为 false 可能更稳定
-        recognitionRef.current.interimResults = true;
-        recognitionRef.current.lang = 'zh-CN';
-        recognitionRef.current.maxAlternatives = 1;
-
-        recognitionRef.current.onstart = async () => {
-          console.log('语音识别已启动');
-          toast.success('开始录音，请说话...');
-          setIsRecording(true);
-          setInput(''); // 清空输入框
+  // 初始化音频上下文和分析器
+  const initAudioContext = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      
+      console.log('获取到麦克风权限');
+      mediaStreamRef.current = stream;
+      
+      // 创建音频上下文和分析器
+      const audioContext = new AudioContext();
+      const analyser = audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(stream);
+      
+      source.connect(analyser);
+      analyser.fftSize = 256;
+      
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+      
+      // 创建 MediaRecorder
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      
+      // 处理录音数据
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      // 录音结束时的处理
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        audioChunksRef.current = [];
+        
+        // 创建表单数据
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.wav');
+        
+        try {
+          const response = await fetch('http://localhost:8000/speech-to-text', {
+            method: 'POST',
+            body: formData,
+          });
           
-          try {
-            // 获取麦克风权限并开始音频可视化
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-              } 
-            });
-            console.log('获取到麦克风权限');
-            mediaStreamRef.current = stream;
-            
-            // 创建音频上下文
-            const audioContext = new AudioContext();
-            const analyser = audioContext.createAnalyser();
-            const source = audioContext.createMediaStreamSource(stream);
-            
-            source.connect(analyser);
-            analyser.fftSize = 256;
-            
-            audioContextRef.current = audioContext;
-            analyserRef.current = analyser;
-            
-            // 开始音频可视化
-            const updateAudioLevel = () => {
-              if (!analyserRef.current || !isRecording) return;
-              
-              const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-              analyserRef.current.getByteFrequencyData(dataArray);
-              
-              // 计算音量级别（0-100）
-              const average = dataArray.reduce((acc, value) => acc + value, 0) / dataArray.length;
-              const level = Math.min(100, (average / 128) * 100);
-              console.log('音量级别:', level);
-              setAudioLevel(level);
-              
-              animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
-            };
-            
-            updateAudioLevel();
-          } catch (error) {
-            console.error('获取麦克风权限失败:', error);
-            if (error instanceof DOMException && error.name === 'NotAllowedError') {
-              toast.error('请允许使用麦克风权限，并刷新页面重试');
-            } else {
-              toast.error('无法访问麦克风，请确保设备支持语音输入');
-            }
-            stopRecording();
-          }
-        };
-
-        recognitionRef.current.onresult = (event: any) => {
-          console.log('收到语音识别结果');
-          const results = event.results;
-          let finalTranscript = '';
-          let interimTranscript = '';
-
-          for (let i = event.resultIndex; i < results.length; i++) {
-            const transcript = results[i][0].transcript;
-            if (results[i].isFinal) {
-              console.log('最终识别结果:', transcript);
-              finalTranscript += transcript;
-              // 在移动端，每次得到最终结果后自动重新开始录音
-              if (!results[i + 1]) {
-                try {
-                  recognitionRef.current?.start();
-                } catch (error) {
-                  console.error('重新启动语音识别失败:', error);
-                }
-              }
-            } else {
-              console.log('临时识别结果:', transcript);
-              interimTranscript += transcript;
-            }
-          }
-
-          // 更新输入框
-          if (finalTranscript) {
-            console.log('更新输入框:', finalTranscript);
-            setInput(prev => {
-              const newValue = prev + finalTranscript;
-              console.log('新的输入框内容:', newValue);
-              return newValue;
-            });
-          }
-        };
-
-        recognitionRef.current.onerror = (event: any) => {
-          console.error('语音识别错误:', event.error);
-          
-          switch(event.error) {
-            case 'not-allowed':
-              toast.error('请允许使用麦克风权限，并刷新页面重试');
-              break;
-            case 'no-speech':
-              toast.error('没有检测到语音，请重试');
-              // 在移动端，no-speech 错误后自动重新开始
-              try {
-                recognitionRef.current?.start();
-              } catch (error) {
-                console.error('重新启动语音识别失败:', error);
-              }
-              break;
-            case 'network':
-              toast.error('网络错误，请检查网络连接');
-              break;
-            case 'aborted':
-              // 忽略中止错误，这通常是用户手动停止的结果
-              break;
-            default:
-              toast.error(`语音识别出错: ${event.error}`);
+          if (!response.ok) {
+            throw new Error('语音识别失败');
           }
           
-          if (event.error !== 'no-speech' && event.error !== 'aborted') {
-            stopRecording();
+          const data = await response.json();
+          if (data.text) {
+            setInput(prev => prev + data.text);
           }
-        };
-
-        recognitionRef.current.onend = () => {
-          console.log('语音识别已结束');
-          // 只有在用户主动停止时才调用 stopRecording
-          if (!isRecording) {
-            stopRecording();
-          }
-        };
+        } catch (error) {
+          console.error('语音识别错误:', error);
+          toast.error('语音识别失败，请重试');
+        }
+      };
+      
+      // 开始音频可视化
+      const updateAudioLevel = () => {
+        if (!analyserRef.current || !isRecording) return;
+        
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(dataArray);
+        
+        const average = dataArray.reduce((acc, value) => acc + value, 0) / dataArray.length;
+        const level = Math.min(100, (average / 128) * 100);
+        setAudioLevel(level);
+        
+        animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
+      };
+      
+      updateAudioLevel();
+      
+    } catch (error) {
+      console.error('初始化音频失败:', error);
+      if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        toast.error('请允许使用麦克风权限，并刷新页面重试');
       } else {
-        console.error('浏览器不支持语音识别');
-        toast.error('您的浏览器不支持语音识别功能，请使用 Chrome 浏览器');
+        toast.error('无法访问麦克风，请确保设备支持语音输入');
       }
     }
+  };
 
-    return () => {
-      stopRecording();
-    };
-  }, [isRecording]); // 添加 isRecording 作为依赖项
-
+  // 停止录音
   const stopRecording = () => {
     console.log('停止录音');
     setIsRecording(false);
     
-    // 停止语音识别
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (error) {
-        console.error('停止语音识别时出错:', error);
-      }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
     }
     
     // 停止音频可视化
@@ -265,40 +202,56 @@ export default function StoryEditor() {
     // 重置状态
     setAudioLevel(0);
     analyserRef.current = null;
+    mediaRecorderRef.current = null;
   };
 
-  const toggleRecording = () => {
-    if (!recognitionRef.current) {
-      toast.error('您的浏览器不支持语音识别功能，请使用 Chrome 浏览器');
-      return;
-    }
+  // 初始化讯飞语音识别
+  useEffect(() => {
+    // 创建讯飞语音识别实例
+    xunfeiRef.current = new XunfeiASR({
+      appId: process.env.NEXT_PUBLIC_XUNFEI_APP_ID || '',
+      apiKey: process.env.NEXT_PUBLIC_XUNFEI_API_KEY || '',
+    })
 
+    // 设置回调函数
+    xunfeiRef.current.setOnLevelChange((level) => {
+      setAudioLevel(level)
+    })
+
+    xunfeiRef.current.setOnResult((text) => {
+      setInput(prev => prev + text)
+    })
+
+    xunfeiRef.current.setOnError((error) => {
+      console.error('语音识别错误:', error)
+      toast.error(error.message)
+      setIsRecording(false)
+    })
+
+    return () => {
+      if (xunfeiRef.current) {
+        xunfeiRef.current.stopRecording()
+      }
+    }
+  }, [])
+
+  // 切换录音状态
+  const toggleRecording = async () => {
     try {
       if (isRecording) {
-        console.log('停止录音...');
-        stopRecording();
+        xunfeiRef.current?.stopRecording()
+        setIsRecording(false)
       } else {
-        console.log('开始录音...');
-        // 在移动端，每次开始录音前检查和请求权限
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(() => {
-              recognitionRef.current.start();
-            })
-            .catch((error) => {
-              console.error('获取麦克风权限失败:', error);
-              toast.error('请允许使用麦克风权限，并刷新页面重试');
-            });
-        } else {
-          toast.error('您的设备不支持语音输入');
-        }
+        await xunfeiRef.current?.startRecording()
+        setIsRecording(true)
+        toast.success('开始录音，请说话...')
       }
     } catch (error) {
-      console.error('语音识别错误:', error);
-      toast.error('启动语音识别失败，请刷新页面重试');
-      stopRecording();
+      console.error('录音错误:', error)
+      toast.error('启动录音失败，请重试')
+      setIsRecording(false)
     }
-  };
+  }
 
   // 自动滚动到最新消息
   const scrollToBottom = () => {
@@ -480,6 +433,13 @@ export default function StoryEditor() {
     toast.info('加载历史访谈记录')
   }
 
+  // 清理函数
+  useEffect(() => {
+    return () => {
+      stopRecording();
+    };
+  }, []);
+
   return (
     <div className="container mx-auto p-4 h-[100dvh] flex flex-col">
       <div className="flex justify-between items-center mb-4">
@@ -554,7 +514,7 @@ export default function StoryEditor() {
               />
               {isRecording && (
                 <div className="absolute left-0 right-0 bottom-0">
-                  <Progress value={audioLevel} className="h-1" />
+                  <Progress value={audioLevel} className="h-1 bg-red-500" />
                 </div>
               )}
             </div>
