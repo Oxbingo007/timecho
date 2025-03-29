@@ -42,8 +42,15 @@ export class XunfeiASR {
   private getAuthUrl(): string {
     const host = 'wss://iat-api.xfyun.cn/v2/iat'
     const date = new Date().toUTCString()
+    const algorithm = 'hmac-sha256'
+    const headers = 'host date request-line'
+    const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\nGET /v2/iat HTTP/1.1`
+    const signatureSha = CryptoJS.HmacSHA256(signatureOrigin, this.apiKey)
+    const signature = CryptoJS.enc.Base64.stringify(signatureSha)
+    const authorizationOrigin = `api_key="${this.appId}", algorithm="${algorithm}", headers="${headers}", signature="${signature}"`
+    const authorization = btoa(authorizationOrigin)
     
-    return `${host}?appid=${this.appId}&apikey=${this.apiKey}`
+    return `${host}?authorization=${authorization}&date=${encodeURI(date)}&host=${encodeURI(new URL(host).host)}`
   }
 
   // 初始化音频上下文
