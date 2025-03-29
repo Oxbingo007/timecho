@@ -141,18 +141,8 @@ export class XunfeiASR {
             if (this.ws?.readyState === WebSocket.OPEN) {
               // 发送数据帧
               const frameData = {
-                common: {
-                  app_id: this.appId
-                },
-                business: {
-                  language: 'zh_cn',
-                  domain: 'iat',
-                  accent: 'mandarin',
-                  format: 'audio/L16;rate=16000',
-                  vad_eos: 3000
-                },
                 data: {
-                  status: 1, // 1表示还在传输数据
+                  status: 1,
                   format: 'audio/L16;rate=16000',
                   encoding: 'raw',
                   audio: base64Audio
@@ -237,17 +227,19 @@ export class XunfeiASR {
             domain: 'iat',
             accent: 'mandarin',
             format: 'audio/L16;rate=16000',
-            vad_eos: 3000
+            vad_eos: 3000,
+            dwa: 'wpgs',  // 开启动态修正功能
+            pd: 'game',   // 设置垂直领域
+            ptt: 0        // 设置标点符号
           },
           data: {
             status: 0,
             format: 'audio/L16;rate=16000',
-            encoding: 'raw',
-            audio: ''
+            encoding: 'raw'
           }
         }
 
-        console.log('Sending initial frame with params:', params)
+        console.log('Sending initial frame with params:', JSON.stringify(params))
 
         if (this.ws?.readyState === WebSocket.OPEN) {
           this.ws.send(JSON.stringify(params))
@@ -309,21 +301,11 @@ export class XunfeiASR {
     // 发送结束帧
     if (this.ws?.readyState === WebSocket.OPEN) {
       const endFrame = {
-        common: {
-          app_id: this.appId
-        },
-        business: {
-          language: 'zh_cn',
-          domain: 'iat',
-          accent: 'mandarin',
-          format: 'audio/L16;rate=16000',
-          vad_eos: 3000
-        },
         data: {
-          status: 2, // 2表示最后一帧音频
+          status: 2,
           format: 'audio/L16;rate=16000',
           encoding: 'raw',
-          audio: ''  // 结束帧不发送音频数据
+          audio: ''
         }
       }
       this.ws.send(JSON.stringify(endFrame))
