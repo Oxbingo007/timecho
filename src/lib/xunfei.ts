@@ -2,7 +2,7 @@ import CryptoJS from 'crypto-js'
 
 interface XunfeiConfig {
   appId: string
-  apiSecret: string
+  apiKey: string  // 改用 APIKey
 }
 
 interface XunfeiResponse {
@@ -26,7 +26,7 @@ interface XunfeiResponse {
 
 export class XunfeiASR {
   private appId: string
-  private apiSecret: string
+  private apiKey: string  // 改用 APIKey
   private ws: WebSocket | null = null
   private isRecording = false
   private mediaRecorder: MediaRecorder | null = null
@@ -40,31 +40,23 @@ export class XunfeiASR {
 
   constructor(config: XunfeiConfig) {
     this.appId = config.appId
-    this.apiSecret = config.apiSecret
+    this.apiKey = config.apiKey  // 改用 APIKey
   }
 
   // 生成鉴权url
   private getAuthUrl(): string {
     const host = 'wss://rtasr.xfyun.cn/v1/ws'
-    const date = Math.floor(Date.now() / 1000)
+    const ts = Math.floor(Date.now() / 1000)
     
-    // 生成原始字符串，注意参数顺序
-    const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\nGET /v1/ws HTTP/1.1`
+    // 生成原始字符串
+    const signatureOrigin = `appid=${this.appId}&ts=${ts}`
     
     // 使用HMAC-SHA1算法
-    const signatureSha = CryptoJS.HmacSHA1(signatureOrigin, this.apiSecret)
+    const signatureSha = CryptoJS.HmacSHA1(signatureOrigin, this.apiKey)
     const signature = CryptoJS.enc.Base64.stringify(signatureSha)
     
-    // 生成authorization
-    const authorization = `api_key="${this.appId}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`
-    
     // 构建最终的URL
-    const url = new URL(host)
-    url.searchParams.append('authorization', authorization)
-    url.searchParams.append('date', date.toString())
-    url.searchParams.append('host', url.host)
-    
-    return url.toString()
+    return `${host}?appid=${this.appId}&ts=${ts}&signa=${encodeURIComponent(signature)}`
   }
 
   // 初始化音频上下文

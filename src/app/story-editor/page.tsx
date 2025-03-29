@@ -210,7 +210,7 @@ export default function StoryEditor() {
     // 创建讯飞语音识别实例
     xunfeiRef.current = new XunfeiASR({
       appId: process.env.NEXT_PUBLIC_XUNFEI_APP_ID || '',
-      apiSecret: process.env.NEXT_PUBLIC_XUNFEI_API_SECRET || '',
+      apiKey: process.env.NEXT_PUBLIC_XUNFEI_API_KEY || '',
     })
 
     // 设置回调函数
