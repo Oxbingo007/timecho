@@ -26,8 +26,7 @@ const SYSTEM_PROMPT = `你是一位专业的生命故事访谈员，你的任务
 - 提出相关的追问，帮助挖掘更多细节
 - 保持对话的自然流畅性`;
 
-const QIANWEN_ACCESS_KEY_ID = process.env.NEXT_PUBLIC_QIANWEN_ACCESS_KEY_ID;
-const QIANWEN_ACCESS_KEY_SECRET = process.env.NEXT_PUBLIC_QIANWEN_ACCESS_KEY_SECRET;
+const QIANWEN_API_KEY = process.env.NEXT_PUBLIC_QIANWEN_API_KEY;
 
 async function chatWithOpenAI(messages: { role: string; content: string }[], modelName: string = 'gpt-4-turbo-preview'): Promise<AIResponse> {
   try {
@@ -147,8 +146,8 @@ async function chatWithDeepseek(messages: { role: string; content: string }[]): 
 
 async function chatWithQianwen(messages: { role: string; content: string }[]): Promise<AIResponse> {
   try {
-    if (!QIANWEN_ACCESS_KEY_ID) {
-      throw new Error('通义千问 AccessKey ID 未配置。请在阿里云 RAM 访问控制中创建 AccessKey，并在环境变量中设置 NEXT_PUBLIC_QIANWEN_ACCESS_KEY_ID');
+    if (!QIANWEN_API_KEY) {
+      throw new Error('通义千问 API Key 未配置。请在阿里云百炼平台获取 API Key，并在环境变量中设置 NEXT_PUBLIC_QIANWEN_API_KEY');
     }
 
     console.log('Sending request to Qianwen API...');
@@ -156,7 +155,7 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
     const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation', {
       method: 'POST',
       headers: {
-        'Authorization': QIANWEN_ACCESS_KEY_ID,
+        'Authorization': `Bearer ${QIANWEN_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -169,6 +168,11 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
               content: msg.content
             }))
           ]
+        },
+        parameters: {
+          temperature: 0.7,
+          top_p: 0.8,
+          result_format: 'message'
         }
       }),
     });
@@ -178,7 +182,8 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Qianwen API Error Response:', errorText);
-      throw new Error(`通义千问 API 错误: ${response.status} - ${errorText}`);
+      const errorJson = JSON.parse(errorText);
+      throw new Error(`通义千问 API 错误: ${errorJson.code} - ${errorJson.message}`);
     }
 
     const data = await response.json();
