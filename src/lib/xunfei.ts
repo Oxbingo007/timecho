@@ -2,7 +2,7 @@ import CryptoJS from 'crypto-js'
 
 interface XunfeiConfig {
   appId: string
-  apiKey: string
+  apiSecret: string
 }
 
 interface XunfeiResponse {
@@ -21,7 +21,7 @@ interface XunfeiResponse {
 
 export class XunfeiASR {
   private appId: string
-  private apiKey: string
+  private apiSecret: string
   private ws: WebSocket | null = null
   private isRecording = false
   private mediaRecorder: MediaRecorder | null = null
@@ -35,7 +35,7 @@ export class XunfeiASR {
 
   constructor(config: XunfeiConfig) {
     this.appId = config.appId
-    this.apiKey = config.apiKey
+    this.apiSecret = config.apiSecret
   }
 
   // 生成鉴权url
@@ -45,7 +45,7 @@ export class XunfeiASR {
     const algorithm = 'hmac-sha256'
     const headers = 'host date request-line'
     const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\nGET /v2/iat HTTP/1.1`
-    const signatureSha = CryptoJS.HmacSHA256(signatureOrigin, this.apiKey)
+    const signatureSha = CryptoJS.HmacSHA256(signatureOrigin, this.apiSecret)
     const signature = CryptoJS.enc.Base64.stringify(signatureSha)
     const authorizationOrigin = `api_key="${this.appId}", algorithm="${algorithm}", headers="${headers}", signature="${signature}"`
     const authorization = btoa(authorizationOrigin)
