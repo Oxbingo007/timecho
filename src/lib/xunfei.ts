@@ -9,12 +9,17 @@ interface XunfeiResponse {
   code: number
   message?: string
   data?: {
+    status: number  // 状态码，0-成功，1-失败，2-结束
     result?: {
-      ws: Array<{
+      ws?: Array<{
         cw: Array<{
           w: string
         }>
       }>
+      text?: string[]  // 实时语音转写的文本结果
+      duration?: number
+      end?: number
+      begin?: number
     }
   }
 }
@@ -40,17 +45,16 @@ export class XunfeiASR {
 
   // 生成鉴权url
   private getAuthUrl(): string {
-    const host = 'wss://iat-api.xfyun.cn/v2/iat'
-    const date = new Date().toUTCString()
-    const algorithm = 'hmac-sha256'
-    const headers = 'host date request-line'
-    const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\nGET /v2/iat HTTP/1.1`
-    const signatureSha = CryptoJS.HmacSHA256(signatureOrigin, this.apiSecret)
-    const signature = CryptoJS.enc.Base64.stringify(signatureSha)
-    const authorizationOrigin = `api_key="${this.appId}", algorithm="${algorithm}", headers="${headers}", signature="${signature}"`
-    const authorization = btoa(authorizationOrigin)
+    const host = 'wss://rtasr.xfyun.cn/v1/ws'  // 更新为正确的WebSocket地址
+    const ts = Math.floor(Date.now() / 1000)  // 当前时间戳（秒）
     
-    return `${host}?authorization=${authorization}&date=${encodeURI(date)}&host=${encodeURI(new URL(host).host)}`
+    // 生成原始字符串
+    const signatureOrigin = `appid=${this.appId}&ts=${ts}`
+    // 使用HMAC-SHA1算法
+    const signatureSha = CryptoJS.HmacSHA1(signatureOrigin, this.apiSecret)
+    const signature = CryptoJS.enc.Base64.stringify(signatureSha)
+    
+    return `${host}?appid=${this.appId}&ts=${ts}&signa=${encodeURIComponent(signature)}`
   }
 
   // 初始化音频上下文
@@ -58,8 +62,8 @@ export class XunfeiASR {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 16000,
-          channelCount: 1,
+          sampleRate: 16000,  // 必须是16k采样率
+          channelCount: 1,    // 必须是单声道
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true
@@ -160,28 +164,10 @@ export class XunfeiASR {
       this.ws.onopen = () => {
         console.log('WebSocket连接已建立')
         
-        // 发送开始参数
-        const params = {
-          common: {
-            app_id: this.appId
-          },
-          business: {
-            language: 'zh_cn',
-            domain: 'iat',
-            accent: 'mandarin',
-            format: 'audio/L16;rate=16000',
-            vad_eos: 3000
-          }
-        }
-
-        if (this.ws) {
-          this.ws.send(JSON.stringify(params))
-        }
-
         // 开始录音
         if (this.mediaRecorder) {
           this.isRecording = true
-          this.mediaRecorder.start(500) // 每500ms发送一次数据
+          this.mediaRecorder.start(40)  // 每40ms发送一次数据（根据文档建议）
         }
       }
 
@@ -194,12 +180,19 @@ export class XunfeiASR {
             return
           }
 
-          if (result.data?.result?.ws) {
-            const text = result.data.result.ws
-              .map(ws => ws.cw.map(cw => cw.w).join(''))
-              .join('')
+          // 处理实时语音转写的结果
+          if (result.data) {
+            if (result.data.status === 2) {
+              // 说明是最后一条结果
+              console.log('语音识别结束')
+            }
             
-            this.onResult?.(text)
+            if (result.data.result?.text) {
+              const text = result.data.result.text.join('')
+              if (text.trim()) {
+                this.onResult?.(text)
+              }
+            }
           }
         } catch (error) {
           console.error('解析识别结果失败:', error)
