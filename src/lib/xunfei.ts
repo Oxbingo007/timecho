@@ -54,7 +54,7 @@ export class XunfeiASR {
     const signature = CryptoJS.enc.Base64.stringify(signatureSha)
     
     // 构建认证头
-    const authorization = `api_key="${this.appId}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`
+    const authorization = encodeURIComponent(`api_key="${this.apiKey}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`)
     
     // 构建最终的URL
     const url = new URL(host)
@@ -246,6 +246,8 @@ export class XunfeiASR {
             audio: ''
           }
         }
+
+        console.log('Sending initial frame with params:', params)
 
         if (this.ws?.readyState === WebSocket.OPEN) {
           this.ws.send(JSON.stringify(params))
