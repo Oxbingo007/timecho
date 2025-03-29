@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Download, Send, Mic, MicOff, MessageSquare, History, ChevronDown, ChevronUp, Plus } from 'lucide-react'
+import { Download, Send, Mic, MicOff, MessageSquare, History, ChevronDown, ChevronUp, Plus, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
@@ -22,6 +22,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { XunfeiASR } from '@/lib/xunfei'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Checkbox } from '@/components/ui/checkbox'
 
 const AI_MODELS = [
   { id: 'gpt3.5', name: 'GPT-3.5', description: 'OpenAI GPT-3.5 Turbo' },
@@ -43,6 +45,8 @@ interface InterviewRecord {
   title: string
   date: string
   preview: string
+  messages: Message[]
+  isSelected?: boolean
 }
 
 export default function StoryEditor() {
@@ -54,6 +58,8 @@ export default function StoryEditor() {
   const [isRecording, setIsRecording] = useState(false)
   const [showRecords, setShowRecords] = useState(false)
   const [records, setRecords] = useState<InterviewRecord[]>([])
+  const [currentInterviewId, setCurrentInterviewId] = useState<string | null>(null)
+  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
   const [audioLevel, setAudioLevel] = useState(0)
@@ -262,23 +268,61 @@ export default function StoryEditor() {
     scrollToBottom()
   }, [messages])
 
-  const startNewChat = () => {
-    setMessages([])
-    setInput('')
-    // 可以在这里添加一个系统提示消息
-    const systemMessage: Message = {
-      role: 'assistant',
-      content: '您好，我是您的生命故事记录助手。请告诉我您想分享的故事，我会帮您记录下来。'
+  // 加载访谈记录
+  useEffect(() => {
+    const loadRecords = async () => {
+      try {
+        const response = await fetch('/api/interviews')
+        if (!response.ok) throw new Error('加载访谈记录失败')
+        const data = await response.json()
+        setRecords(data.interviews)
+      } catch (error) {
+        console.error('Error loading records:', error)
+        toast.error('加载访谈记录失败')
+      }
     }
-    setMessages([systemMessage])
+    loadRecords()
+  }, [])
+
+  // 开始新访谈
+  const startNewChat = async () => {
+    try {
+      const response = await fetch('/api/interviews', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: `访谈记录 ${new Date().toLocaleDateString()}`,
+        }),
+      })
+
+      if (!response.ok) throw new Error('创建访谈记录失败')
+      const data = await response.json()
+      
+      setCurrentInterviewId(data.interview.id)
+      setMessages([{
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '欢迎来到生命故事访谈。我是您的AI访谈助手，很高兴能和您交流。我会帮助您整理和讲述您的人生故事。请问您想从哪里开始分享呢？比如，您可以先简单介绍一下自己。',
+        timestamp: new Date()
+      }])
+      setInput('')
+    } catch (error) {
+      console.error('Error creating interview:', error)
+      toast.error('创建访谈记录失败')
+    }
   }
 
+  // 发送消息
   const sendMessage = async () => {
-    if (!input.trim() || isLoading) return
+    if (!input.trim() || isLoading || !currentInterviewId) return
 
     const userMessage: Message = {
+      id: crypto.randomUUID(),
       role: 'user',
-      content: input
+      content: input,
+      timestamp: new Date()
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -286,12 +330,17 @@ export default function StoryEditor() {
     setIsLoading(true)
 
     try {
-      console.log('Sending message:', {
-        messages: [...messages, userMessage],
-        model: selectedModel
-      });
+      // 保存用户消息
+      await fetch(`/api/interviews/${currentInterviewId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(userMessage),
+      })
 
-      const response = await fetch('/api/chat', {
+      // 获取 AI 回复
+      const aiResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -302,119 +351,121 @@ export default function StoryEditor() {
         }),
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || '发送消息失败')
+      if (!aiResponse.ok) {
+        throw new Error('发送消息失败')
       }
 
-      if (!data.message) {
-        throw new Error('服务器返回了无效的响应格式')
-      }
-
+      const data = await aiResponse.json()
       const assistantMessage: Message = {
+        id: crypto.randomUUID(),
         role: 'assistant',
-        content: data.message
+        content: data.message,
+        timestamp: new Date()
       }
+
+      // 保存 AI 回复
+      await fetch(`/api/interviews/${currentInterviewId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(assistantMessage),
+      })
 
       setMessages(prev => [...prev, assistantMessage])
-
-      // 保存到访谈记录
-      const newRecord: InterviewRecord = {
-        id: Date.now().toString(),
-        title: `访谈记录 ${new Date().toLocaleDateString()}`,
-        date: new Date().toISOString(),
-        preview: userMessage.content
-      }
-
-      const updatedRecords = [...records, newRecord]
-      setRecords(updatedRecords)
-      localStorage.setItem('interviewRecords', JSON.stringify(updatedRecords))
 
     } catch (error) {
       console.error('Message error:', error)
       const errorMessage = error instanceof Error ? error.message : '发送消息失败'
       toast.error(errorMessage)
-      // 移除失败的消息
       setMessages(prev => prev.slice(0, -1))
     } finally {
       setIsLoading(false)
     }
   }
 
-  // 导出访谈记录
-  const exportInterview = async () => {
-    setIsExporting(true)
+  // 切换消息选择状态
+  const toggleMessageSelection = (messageId: string) => {
+    setSelectedMessages(prev => {
+      const newSelection = new Set(prev)
+      if (newSelection.has(messageId)) {
+        newSelection.delete(messageId)
+      } else {
+        newSelection.add(messageId)
+      }
+      return newSelection
+    })
+  }
+
+  // 生成访谈纪要
+  const generateSummary = async () => {
+    if (!currentInterviewId || selectedMessages.size === 0) {
+      toast.error('请先选择要包含在纪要中的内容')
+      return
+    }
+
     try {
-      const response = await fetch('/api/export', {
+      setIsExporting(true)
+      const response = await fetch(`/api/interviews/${currentInterviewId}/summary`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({
+          messageIds: Array.from(selectedMessages)
+        }),
       })
 
-      // Check if the response is JSON (error) or blob (document)
-      const contentType = response.headers.get('content-type')
-      if (contentType?.includes('application/json')) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || '导出失败')
-      }
-
-      if (!response.ok) {
-        throw new Error(`导出失败: ${response.status}`)
-      }
-
+      if (!response.ok) throw new Error('生成纪要失败')
+      
       const blob = await response.blob()
-      if (!blob.size) {
-        throw new Error('导出的文件为空')
-      }
-
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `访谈记录_${new Date().toLocaleDateString('zh-CN')}.docx`
+      a.download = `访谈纪要_${new Date().toLocaleDateString('zh-CN')}.docx`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
 
-      toast.success('访谈内容已导出')
+      toast.success('纪要已生成')
     } catch (error) {
-      console.error('Export error:', error)
-      toast.error(error instanceof Error ? error.message : '导出失败，请重试')
+      console.error('Summary generation error:', error)
+      toast.error('生成纪要失败')
     } finally {
       setIsExporting(false)
     }
   }
 
-  // Load interview records from localStorage
-  useEffect(() => {
-    const loadRecords = () => {
-      try {
-        const savedRecords = localStorage.getItem('interviewRecords')
-        if (savedRecords) {
-          setRecords(JSON.parse(savedRecords))
-        }
-      } catch (error) {
-        console.error('Error loading records:', error)
-        toast.error('加载访谈记录失败')
-      }
+  // 加载历史访谈
+  const loadInterviewChat = async (record: InterviewRecord) => {
+    try {
+      const response = await fetch(`/api/interviews/${record.id}/messages`)
+      if (!response.ok) throw new Error('加载访谈内容失败')
+      
+      const data = await response.json()
+      setMessages(data.messages)
+      setCurrentInterviewId(record.id)
+      setSelectedMessages(new Set())
+      toast.success('加载访谈记录成功')
+    } catch (error) {
+      console.error('Error loading interview:', error)
+      toast.error('加载访谈记录失败')
     }
-    loadRecords()
-  }, [])
+  }
 
+  // 导出访谈记录
   const handleExport = async (record: InterviewRecord) => {
     try {
       setIsExporting(true)
-      const response = await fetch(`/api/dify/export?conversationId=${record.id}`)
+      const response = await fetch(`/api/interviews/${record.id}/export`)
       if (!response.ok) throw new Error('导出失败')
       
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `访谈记录_${record.date}.docx`
+      a.download = `访谈记录_${new Date().toLocaleDateString('zh-CN')}.docx`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
@@ -429,21 +480,21 @@ export default function StoryEditor() {
     }
   }
 
-  const handleDelete = (record: InterviewRecord) => {
+  // 删除访谈记录
+  const handleDelete = async (record: InterviewRecord) => {
     try {
+      const response = await fetch(`/api/interviews/${record.id}`, {
+        method: 'DELETE'
+      })
+      if (!response.ok) throw new Error('删除失败')
+      
       const newRecords = records.filter(r => r.id !== record.id)
       setRecords(newRecords)
-      localStorage.setItem('interviewRecords', JSON.stringify(newRecords))
       toast.success('删除成功')
     } catch (error) {
       console.error('Delete error:', error)
       toast.error('删除失败')
     }
-  }
-
-  const loadInterviewChat = (record: InterviewRecord) => {
-    // TODO: 加载历史访谈内容到聊天界面
-    toast.info('加载历史访谈记录')
   }
 
   // 清理函数
@@ -491,18 +542,34 @@ export default function StoryEditor() {
               {messages.map((message, index) => (
                 <div
                   key={index}
-                  className={`flex ${
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                  className={`flex items-start gap-4 ${
+                    message.role === 'assistant' ? 'flex-row' : 'flex-row-reverse'
                   }`}
                 >
-                  <div
-                    className={`max-w-[80%] rounded-lg p-3 ${
-                      message.role === 'user'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted'
-                    }`}
-                  >
-                    {message.content}
+                  <div className="flex-shrink-0">
+                    <Avatar>
+                      <AvatarFallback>
+                        {message.role === 'assistant' ? 'AI' : '我'}
+                      </AvatarFallback>
+                    </Avatar>
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <Card className={`p-4 ${
+                      message.role === 'assistant' ? 'bg-primary/10' : 'bg-muted'
+                    }`}>
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="prose max-w-none">
+                          {message.content}
+                        </div>
+                        <Checkbox
+                          checked={selectedMessages.has(message.id)}
+                          onCheckedChange={() => toggleMessageSelection(message.id)}
+                        />
+                      </div>
+                    </Card>
+                    <div className="text-xs text-gray-500">
+                      {message.timestamp?.toLocaleString()}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -510,54 +577,74 @@ export default function StoryEditor() {
             </div>
           </Card>
 
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="flex-1 relative">
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    sendMessage()
-                  }
-                }}
-                placeholder="输入您的故事..."
-                className="flex-1 resize-none min-h-[80px] sm:min-h-0"
-                disabled={isLoading || isRecording}
-              />
-              {isRecording && (
-                <div className="absolute left-0 right-0 bottom-0">
-                  <Progress value={audioLevel} className="h-1 bg-red-500" />
-                </div>
-              )}
+          <div className="mt-4 space-y-4">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={generateSummary}
+                disabled={isExporting || selectedMessages.size === 0}
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                生成纪要
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setSelectedMessages(new Set())}
+                disabled={selectedMessages.size === 0}
+              >
+                清除选择
+              </Button>
             </div>
-            <div className="flex flex-row sm:flex-col gap-2">
-              <Button
-                variant={isRecording ? "destructive" : "outline"}
-                onClick={toggleRecording}
-                disabled={isLoading}
-                className="flex-1 sm:flex-none relative"
-              >
-                {isRecording ? (
-                  <>
-                    <MicOff className="w-4 h-4 mr-2" />
-                    停止录音
-                  </>
-                ) : (
-                  <>
-                    <Mic className="w-4 h-4 mr-2" />
-                    语音输入
-                  </>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex-1 relative">
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      sendMessage()
+                    }
+                  }}
+                  placeholder="输入您的故事..."
+                  className="flex-1 resize-none min-h-[80px] sm:min-h-0"
+                  disabled={isLoading || isRecording}
+                />
+                {isRecording && (
+                  <div className="absolute left-0 right-0 bottom-0">
+                    <Progress value={audioLevel} className="h-1 bg-red-500" />
+                  </div>
                 )}
-              </Button>
-              <Button
-                onClick={sendMessage}
-                disabled={isLoading || !input.trim()}
-                className="flex-1 sm:flex-none"
-              >
-                <Send className="w-4 h-4 mr-2" />
-                发送
-              </Button>
+              </div>
+              <div className="flex flex-row sm:flex-col gap-2">
+                <Button
+                  variant={isRecording ? "destructive" : "outline"}
+                  onClick={toggleRecording}
+                  disabled={isLoading}
+                  className="flex-1 sm:flex-none relative"
+                >
+                  {isRecording ? (
+                    <>
+                      <MicOff className="w-4 h-4 mr-2" />
+                      停止录音
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-4 h-4 mr-2" />
+                      语音输入
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={sendMessage}
+                  disabled={isLoading || !input.trim()}
+                  className="flex-1 sm:flex-none"
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  发送
+                </Button>
+              </div>
             </div>
           </div>
         </div>

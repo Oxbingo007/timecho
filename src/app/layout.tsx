@@ -1,13 +1,18 @@
-import './globals.css'
+import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
+import './globals.css'
 import { Toaster } from 'sonner'
+import { initDatabase } from '@/lib/db'
 
 const inter = Inter({ subsets: ['latin'] })
 
-export const metadata = {
-  title: '时光回声',
-  description: '用 AI 技术为您珍贵的回忆赋予新的生命',
+export const metadata: Metadata = {
+  title: '生命故事访谈',
+  description: '使用 AI 辅助记录生命故事',
 }
+
+// 初始化数据库
+initDatabase()
 
 export default function RootLayout({
   children,
@@ -15,13 +20,13 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="zh">
+    <html lang="zh-CN">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body className={inter.className}>
-        <Toaster position="top-center" />
+        <Toaster />
         {children}
       </body>
     </html>
