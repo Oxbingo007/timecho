@@ -126,6 +126,9 @@ export class XunfeiASR {
               samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
             }
             
+            // 将Int16Array转换为Base64
+            const base64Audio = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(samples.buffer))))
+            
             // 发送音频数据到讯飞服务器
             if (this.ws?.readyState === WebSocket.OPEN) {
               // 发送数据帧
@@ -144,13 +147,14 @@ export class XunfeiASR {
                   status: 1, // 1表示还在传输数据
                   format: 'audio/L16;rate=16000',
                   encoding: 'raw',
-                  audio: Array.from(samples)
+                  audio: base64Audio
                 }
               }
               this.ws.send(JSON.stringify(frameData))
             }
           } catch (error) {
             console.error('处理音频数据失败:', error)
+            this.onError?.(new Error('处理音频数据失败'))
           }
         }
       }
