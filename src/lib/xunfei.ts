@@ -113,7 +113,7 @@ export class XunfeiASR {
           try {
             // 将音频数据转换为PCM格式
             const arrayBuffer = await event.data.arrayBuffer()
-            const audioContext = new AudioContext()
+            const audioContext = new AudioContext({ sampleRate: 16000 })
             const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
             
             // 获取PCM数据
@@ -128,7 +128,26 @@ export class XunfeiASR {
             
             // 发送音频数据到讯飞服务器
             if (this.ws?.readyState === WebSocket.OPEN) {
-              this.ws.send(samples.buffer)
+              // 发送数据帧
+              const frameData = {
+                common: {
+                  app_id: this.appId
+                },
+                business: {
+                  language: 'zh_cn',
+                  domain: 'iat',
+                  accent: 'mandarin',
+                  format: 'audio/L16;rate=16000',
+                  vad_eos: 3000
+                },
+                data: {
+                  status: 1, // 1表示还在传输数据
+                  format: 'audio/L16;rate=16000',
+                  encoding: 'raw',
+                  audio: Array.from(samples)
+                }
+              }
+              this.ws.send(JSON.stringify(frameData))
             }
           } catch (error) {
             console.error('处理音频数据失败:', error)
@@ -185,7 +204,7 @@ export class XunfeiASR {
       this.ws.onopen = () => {
         console.log('WebSocket连接已建立')
         
-        // 发送开始参数
+        // 发送开始帧
         const params = {
           common: {
             app_id: this.appId
@@ -198,9 +217,10 @@ export class XunfeiASR {
             vad_eos: 3000
           },
           data: {
-            status: 0,
+            status: 0, // 0表示第一帧音频
             format: 'audio/L16;rate=16000',
-            encoding: 'raw'
+            encoding: 'raw',
+            audio: ''  // 第一帧不发送音频数据
           }
         }
 
@@ -211,7 +231,7 @@ export class XunfeiASR {
         // 开始录音
         if (this.mediaRecorder) {
           this.isRecording = true
-          this.mediaRecorder.start(40)  // 每40ms发送一次数据（根据文档建议）
+          this.mediaRecorder.start(40)  // 每40ms发送一次数据
         }
       }
 
@@ -264,6 +284,29 @@ export class XunfeiASR {
 
   // 停止录音
   stopRecording() {
+    // 发送结束帧
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      const endFrame = {
+        common: {
+          app_id: this.appId
+        },
+        business: {
+          language: 'zh_cn',
+          domain: 'iat',
+          accent: 'mandarin',
+          format: 'audio/L16;rate=16000',
+          vad_eos: 3000
+        },
+        data: {
+          status: 2, // 2表示最后一帧音频
+          format: 'audio/L16;rate=16000',
+          encoding: 'raw',
+          audio: ''  // 结束帧不发送音频数据
+        }
+      }
+      this.ws.send(JSON.stringify(endFrame))
+    }
+
     this.isRecording = false
 
     // 停止动画帧
