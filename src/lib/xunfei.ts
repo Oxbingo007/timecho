@@ -46,11 +46,10 @@ export class XunfeiASR {
   // 生成鉴权url
   private getAuthUrl(): string {
     const host = 'wss://rtasr.xfyun.cn/v1/ws'
-    const date = new Date().toUTCString()
-    const requestLine = 'GET /v1/ws HTTP/1.1'
+    const ts = Math.floor(Date.now() / 1000).toString()
     
     // 构建签名原始字符串
-    const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\n${requestLine}`
+    const signatureOrigin = `${this.appId}${ts}`
     console.log('Signature Origin:', signatureOrigin)
     
     // 使用HMAC-SHA1算法
@@ -60,9 +59,9 @@ export class XunfeiASR {
     
     // 构建最终的URL
     const url = new URL(host)
-    url.searchParams.append('appid', this.appId)  // 直接添加 appid 参数
-    url.searchParams.append('ts', Math.floor(Date.now() / 1000).toString())  // 添加时间戳
-    url.searchParams.append('signa', signature)  // 添加签名
+    url.searchParams.append('appid', this.appId)
+    url.searchParams.append('ts', ts)
+    url.searchParams.append('signa', signature)
     
     return url.toString()
   }
