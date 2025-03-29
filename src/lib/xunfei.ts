@@ -46,17 +46,23 @@ export class XunfeiASR {
   // 生成鉴权url
   private getAuthUrl(): string {
     const host = 'wss://rtasr.xfyun.cn/v1/ws'
-    const ts = Math.floor(Date.now() / 1000)
-    
-    // 生成原始字符串
-    const signatureOrigin = `appid=${this.appId}&ts=${ts}`
+    const date = new Date().toUTCString()
+    const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\nGET /v1/ws HTTP/1.1`
     
     // 使用HMAC-SHA1算法
     const signatureSha = CryptoJS.HmacSHA1(signatureOrigin, this.apiKey)
     const signature = CryptoJS.enc.Base64.stringify(signatureSha)
     
+    // 构建认证头
+    const authorization = `api_key="${this.appId}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`
+    
     // 构建最终的URL
-    return `${host}?appid=${this.appId}&ts=${ts}&signa=${encodeURIComponent(signature)}`
+    const url = new URL(host)
+    url.searchParams.append('authorization', authorization)
+    url.searchParams.append('date', date)
+    url.searchParams.append('host', url.host)
+    
+    return url.toString()
   }
 
   // 初始化音频上下文
@@ -205,9 +211,20 @@ export class XunfeiASR {
 
       // 连接讯飞服务器
       const url = this.getAuthUrl()
+      console.log('Connecting to WebSocket with URL:', url)
+      
       this.ws = new WebSocket(url)
+      
+      // 设置超时
+      const connectionTimeout = setTimeout(() => {
+        if (this.ws?.readyState !== WebSocket.OPEN) {
+          this.ws?.close()
+          throw new Error('WebSocket连接超时')
+        }
+      }, 5000)
 
       this.ws.onopen = () => {
+        clearTimeout(connectionTimeout)
         console.log('WebSocket连接已建立')
         
         // 发送开始帧
@@ -223,40 +240,33 @@ export class XunfeiASR {
             vad_eos: 3000
           },
           data: {
-            status: 0, // 0表示第一帧音频
+            status: 0,
             format: 'audio/L16;rate=16000',
             encoding: 'raw',
-            audio: ''  // 第一帧不发送音频数据
+            audio: ''
           }
         }
 
-        if (this.ws) {
+        if (this.ws?.readyState === WebSocket.OPEN) {
           this.ws.send(JSON.stringify(params))
-        }
-        
-        // 开始录音
-        if (this.mediaRecorder) {
           this.isRecording = true
-          this.mediaRecorder.start(40)  // 每40ms发送一次数据
+          if (this.mediaRecorder) {
+            this.mediaRecorder.start(40)
+          }
         }
       }
 
       this.ws.onmessage = (event) => {
         try {
           const result = JSON.parse(event.data) as XunfeiResponse
+          console.log('Received message:', result)
           
           if (result.code !== 0) {
             this.onError?.(new Error(result.message || '语音识别失败'))
             return
           }
 
-          // 处理实时语音转写的结果
           if (result.data) {
-            if (result.data.status === 2) {
-              // 说明是最后一条结果
-              console.log('语音识别结束')
-            }
-            
             if (result.data.result?.text) {
               const text = result.data.result.text.join('')
               if (text.trim()) {
@@ -271,12 +281,15 @@ export class XunfeiASR {
       }
 
       this.ws.onerror = (error) => {
+        clearTimeout(connectionTimeout)
         console.error('WebSocket错误:', error)
         this.onError?.(new Error('连接服务器失败'))
+        this.stopRecording()
       }
 
-      this.ws.onclose = () => {
-        console.log('WebSocket连接已关闭')
+      this.ws.onclose = (event) => {
+        clearTimeout(connectionTimeout)
+        console.log('WebSocket连接已关闭:', event.code, event.reason)
         if (this.isRecording) {
           this.stopRecording()
         }
@@ -284,7 +297,8 @@ export class XunfeiASR {
 
     } catch (error) {
       console.error('启动录音失败:', error)
-      this.onError?.(new Error('启动录音失败'))
+      this.onError?.(new Error(error instanceof Error ? error.message : '启动录音失败'))
+      this.stopRecording()
     }
   }
 
