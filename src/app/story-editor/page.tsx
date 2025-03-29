@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
 import { chatWithAI } from '@/lib/ai-services'
-import { Message, AIModel } from '@/lib/types'
+import { AIModel } from '@/lib/types'
 import {
   Select,
   SelectContent,
@@ -24,6 +24,30 @@ import {
 import { XunfeiASR } from '@/lib/xunfei'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Checkbox } from '@/components/ui/checkbox'
+import { type Message as DBMessage } from '@/lib/db/schema'
+
+// 定义消息类型
+type Role = 'user' | 'assistant'
+
+interface BaseMessage {
+  role: Role
+  content: string
+}
+
+interface ChatMessage extends BaseMessage {
+  id: string
+  createdAt: Date
+  interviewId: string
+  isSelected: boolean
+}
+
+interface InterviewRecord {
+  id: string
+  title: string
+  date: string
+  preview: string
+  messages: ChatMessage[]
+}
 
 const AI_MODELS = [
   { id: 'gpt3.5', name: 'GPT-3.5', description: 'OpenAI GPT-3.5 Turbo' },
@@ -40,46 +64,42 @@ declare global {
   }
 }
 
-interface InterviewRecord {
-  id: string
-  title: string
-  date: string
-  preview: string
-  messages: Message[]
-  isSelected?: boolean
-}
-
 export default function StoryEditor() {
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isExporting, setIsExporting] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<AIModel>('gpt3.5')
   const [isRecording, setIsRecording] = useState(false)
-  const [showRecords, setShowRecords] = useState(false)
-  const [records, setRecords] = useState<InterviewRecord[]>([])
   const [currentInterviewId, setCurrentInterviewId] = useState<string | null>(null)
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set())
+  const [isExporting, setIsExporting] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('gpt-3.5-turbo')
+  const [records, setRecords] = useState<InterviewRecord[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const [isWsConnected, setIsWsConnected] = useState(false)
+  const [showRecords, setShowRecords] = useState(false)
   const recognitionRef = useRef<any>(null)
   const [audioLevel, setAudioLevel] = useState(0)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const xunfeiRef = useRef<XunfeiASR | null>(null)
 
   // 初始化消息
   useEffect(() => {
-    setMessages([
-      {
-        role: 'assistant',
-        content: '欢迎来到生命故事访谈。我是您的AI访谈助手，很高兴能和您交流。我会帮助您整理和讲述您的人生故事。请问您想从哪里开始分享呢？比如，您可以先简单介绍一下自己。',
-        timestamp: new Date()
-      }
-    ]);
+    const initialMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '欢迎来到生命故事访谈。我是您的AI访谈助手，很高兴能和您交流。我会帮助您整理和讲述您的人生故事。请问您想从哪里开始分享呢？比如，您可以先简单介绍一下自己。',
+      createdAt: new Date(),
+      interviewId: '',
+      isSelected: false
+    }
+    setMessages([initialMessage]);
   }, []);
 
   // 初始化音频上下文和分析器
@@ -298,15 +318,29 @@ export default function StoryEditor() {
       })
 
       if (!response.ok) throw new Error('创建访谈记录失败')
-      const data = await response.json()
+      const { interview } = await response.json()
       
-      setCurrentInterviewId(data.interview.id)
-      setMessages([{
-        id: crypto.randomUUID(),
-        role: 'assistant',
+      setCurrentInterviewId(interview.id)
+      
+      // 创建欢迎消息
+      const welcomeMessageData = {
+        role: 'assistant' as const,
         content: '欢迎来到生命故事访谈。我是您的AI访谈助手，很高兴能和您交流。我会帮助您整理和讲述您的人生故事。请问您想从哪里开始分享呢？比如，您可以先简单介绍一下自己。',
-        timestamp: new Date()
-      }])
+      }
+      
+      // 保存欢迎消息
+      const messageResponse = await fetch(`/api/interviews/${interview.id}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(welcomeMessageData),
+      })
+
+      if (!messageResponse.ok) throw new Error('创建欢迎消息失败')
+      const { message: welcomeMessage } = await messageResponse.json()
+      
+      setMessages([welcomeMessage])
       setInput('')
     } catch (error) {
       console.error('Error creating interview:', error)
@@ -318,11 +352,13 @@ export default function StoryEditor() {
   const sendMessage = async () => {
     if (!input.trim() || isLoading || !currentInterviewId) return
 
-    const userMessage: Message = {
+    const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
-      role: 'user',
+      role: 'user' as const,
       content: input,
-      timestamp: new Date()
+      createdAt: new Date(),
+      interviewId: currentInterviewId,
+      isSelected: false
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -356,11 +392,13 @@ export default function StoryEditor() {
       }
 
       const data = await aiResponse.json()
-      const assistantMessage: Message = {
+      const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
-        role: 'assistant',
+        role: 'assistant' as const,
         content: data.message,
-        timestamp: new Date()
+        createdAt: new Date(),
+        interviewId: currentInterviewId,
+        isSelected: false
       }
 
       // 保存 AI 回复
@@ -568,7 +606,7 @@ export default function StoryEditor() {
                       </div>
                     </Card>
                     <div className="text-xs text-gray-500">
-                      {message.timestamp?.toLocaleString()}
+                      {message.createdAt?.toLocaleString()}
                     </div>
                   </div>
                 </div>
