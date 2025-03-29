@@ -58,15 +58,11 @@ export class XunfeiASR {
     const signature = CryptoJS.enc.Base64.stringify(signatureSha)
     console.log('Signature:', signature)
     
-    // 构建认证头
-    const authorization = `api_key="${this.appId}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`
-    console.log('Authorization:', authorization)
-    
     // 构建最终的URL
     const url = new URL(host)
-    url.searchParams.append('authorization', encodeURIComponent(authorization))
-    url.searchParams.append('date', date)
-    url.searchParams.append('host', new URL(host).host)
+    url.searchParams.append('appid', this.appId)  // 直接添加 appid 参数
+    url.searchParams.append('ts', Math.floor(Date.now() / 1000).toString())  // 添加时间戳
+    url.searchParams.append('signa', signature)  // 添加签名
     
     return url.toString()
   }
