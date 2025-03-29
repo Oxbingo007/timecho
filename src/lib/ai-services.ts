@@ -189,13 +189,25 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
     const data = await response.json();
     console.log('Qianwen API Response Data:', JSON.stringify(data, null, 2));
 
-    if (!data.output?.text && !data.output?.message?.content) {
+    // 检查错误响应
+    if (data.code && data.message) {
+      throw new Error(`通义千问 API 错误: ${data.code} - ${data.message}`);
+    }
+
+    // 检查输出格式
+    if (!data.output) {
+      console.error('Missing output in Qianwen response:', data);
+      throw new Error('通义千问返回了无效的响应格式：缺少 output 字段');
+    }
+
+    const content = data.output.text || (data.output.message && data.output.message.content);
+    if (!content) {
       console.error('Invalid response format from Qianwen:', data);
-      throw new Error('通义千问返回了无效的响应格式');
+      throw new Error('通义千问返回了无效的响应格式：无法获取回复内容');
     }
 
     return {
-      content: data.output.message?.content || data.output.text,
+      content: content,
       model: 'qianwen'
     };
   } catch (error) {
