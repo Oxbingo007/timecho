@@ -108,10 +108,31 @@ export class XunfeiASR {
       })
 
       // 处理音频数据
-      this.mediaRecorder.ondataavailable = (event) => {
+      this.mediaRecorder.ondataavailable = async (event) => {
         if (event.data.size > 0 && this.ws?.readyState === WebSocket.OPEN) {
-          // 发送音频数据到讯飞服务器
-          this.ws.send(event.data)
+          try {
+            // 将音频数据转换为PCM格式
+            const arrayBuffer = await event.data.arrayBuffer()
+            const audioContext = new AudioContext()
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+            
+            // 获取PCM数据
+            const pcmData = audioBuffer.getChannelData(0)
+            const samples = new Int16Array(pcmData.length)
+            
+            // 将Float32Array转换为Int16Array
+            for (let i = 0; i < pcmData.length; i++) {
+              const s = Math.max(-1, Math.min(1, pcmData[i]))
+              samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+            }
+            
+            // 发送音频数据到讯飞服务器
+            if (this.ws?.readyState === WebSocket.OPEN) {
+              this.ws.send(samples.buffer)
+            }
+          } catch (error) {
+            console.error('处理音频数据失败:', error)
+          }
         }
       }
 
@@ -163,6 +184,29 @@ export class XunfeiASR {
 
       this.ws.onopen = () => {
         console.log('WebSocket连接已建立')
+        
+        // 发送开始参数
+        const params = {
+          common: {
+            app_id: this.appId
+          },
+          business: {
+            language: 'zh_cn',
+            domain: 'iat',
+            accent: 'mandarin',
+            format: 'audio/L16;rate=16000',
+            vad_eos: 3000
+          },
+          data: {
+            status: 0,
+            format: 'audio/L16;rate=16000',
+            encoding: 'raw'
+          }
+        }
+
+        if (this.ws) {
+          this.ws.send(JSON.stringify(params))
+        }
         
         // 开始录音
         if (this.mediaRecorder) {
