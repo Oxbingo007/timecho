@@ -170,9 +170,7 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
           ]
         },
         parameters: {
-          temperature: 0.7,
-          top_p: 0.8,
-          result_format: 'message'
+          temperature: 0.7
         }
       }),
     });
@@ -200,14 +198,14 @@ async function chatWithQianwen(messages: { role: string; content: string }[]): P
       throw new Error('通义千问返回了无效的响应格式：缺少 output 字段');
     }
 
-    const content = data.output.text || (data.output.message && data.output.message.content);
-    if (!content) {
+    // 直接获取 output.text，这是通义千问API的标准响应格式
+    if (!data.output.text) {
       console.error('Invalid response format from Qianwen:', data);
       throw new Error('通义千问返回了无效的响应格式：无法获取回复内容');
     }
 
     return {
-      content: content,
+      content: data.output.text,
       model: 'qianwen'
     };
   } catch (error) {
