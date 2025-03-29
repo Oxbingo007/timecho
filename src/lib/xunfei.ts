@@ -47,20 +47,26 @@ export class XunfeiASR {
   private getAuthUrl(): string {
     const host = 'wss://rtasr.xfyun.cn/v1/ws'
     const date = new Date().toUTCString()
-    const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\nGET /v1/ws HTTP/1.1`
+    const requestLine = 'GET /v1/ws HTTP/1.1'
+    
+    // 构建签名原始字符串
+    const signatureOrigin = `host: ${new URL(host).host}\ndate: ${date}\n${requestLine}`
+    console.log('Signature Origin:', signatureOrigin)
     
     // 使用HMAC-SHA1算法
     const signatureSha = CryptoJS.HmacSHA1(signatureOrigin, this.apiKey)
     const signature = CryptoJS.enc.Base64.stringify(signatureSha)
+    console.log('Signature:', signature)
     
     // 构建认证头
-    const authorization = encodeURIComponent(`api_key="${this.appId}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`)
+    const authorization = `api_key="${this.appId}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`
+    console.log('Authorization:', authorization)
     
     // 构建最终的URL
     const url = new URL(host)
-    url.searchParams.append('authorization', authorization)
+    url.searchParams.append('authorization', encodeURIComponent(authorization))
     url.searchParams.append('date', date)
-    url.searchParams.append('host', url.host)
+    url.searchParams.append('host', new URL(host).host)
     
     return url.toString()
   }
