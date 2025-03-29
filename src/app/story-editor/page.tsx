@@ -89,18 +89,53 @@ export default function StoryEditor() {
   const audioChunksRef = useRef<Blob[]>([])
   const xunfeiRef = useRef<XunfeiASR | null>(null)
 
-  // 初始化消息
+  // 初始化消息和访谈记录
   useEffect(() => {
-    const initialMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '欢迎来到生命故事访谈。我是您的AI访谈助手，很高兴能和您交流。我会帮助您整理和讲述您的人生故事。请问您想从哪里开始分享呢？比如，您可以先简单介绍一下自己。',
-      createdAt: new Date(),
-      interviewId: '',
-      isSelected: false
+    const initializeChat = async () => {
+      try {
+        // 创建新的访谈记录
+        const response = await fetch('/api/interviews', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: `访谈记录 ${new Date().toLocaleDateString()}`,
+          }),
+        })
+
+        if (!response.ok) throw new Error('创建访谈记录失败')
+        const { interview } = await response.json()
+        
+        setCurrentInterviewId(interview.id)
+        
+        // 创建欢迎消息
+        const welcomeMessageData = {
+          role: 'assistant' as const,
+          content: '欢迎来到生命故事访谈。我是您的AI访谈助手，很高兴能和您交流。我会帮助您整理和讲述您的人生故事。请问您想从哪里开始分享呢？比如，您可以先简单介绍一下自己。',
+        }
+        
+        // 保存欢迎消息
+        const messageResponse = await fetch(`/api/interviews/${interview.id}/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(welcomeMessageData),
+        })
+
+        if (!messageResponse.ok) throw new Error('创建欢迎消息失败')
+        const { message: welcomeMessage } = await messageResponse.json()
+        
+        setMessages([welcomeMessage])
+      } catch (error) {
+        console.error('Error initializing chat:', error)
+        toast.error('初始化聊天失败')
+      }
     }
-    setMessages([initialMessage]);
-  }, []);
+
+    initializeChat()
+  }, [])
 
   // 初始化音频上下文和分析器
   const initAudioContext = async () => {
@@ -295,85 +330,67 @@ export default function StoryEditor() {
         const response = await fetch('/api/interviews')
         if (!response.ok) throw new Error('加载访谈记录失败')
         const data = await response.json()
-        setRecords(data.interviews)
+        setRecords(data.interviews.map((interview: any) => ({
+          ...interview,
+          date: new Date(interview.createdAt).toLocaleDateString(),
+          preview: '点击加载访谈内容'
+        })))
       } catch (error) {
         console.error('Error loading records:', error)
-        toast.error('加载访谈记录失败')
+        // 不显示错误提示，因为这不是关键功能
       }
     }
     loadRecords()
   }, [])
 
-  // 开始新访谈
-  const startNewChat = async () => {
-    try {
-      const response = await fetch('/api/interviews', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: `访谈记录 ${new Date().toLocaleDateString()}`,
-        }),
-      })
-
-      if (!response.ok) throw new Error('创建访谈记录失败')
-      const { interview } = await response.json()
-      
-      setCurrentInterviewId(interview.id)
-      
-      // 创建欢迎消息
-      const welcomeMessageData = {
-        role: 'assistant' as const,
-        content: '欢迎来到生命故事访谈。我是您的AI访谈助手，很高兴能和您交流。我会帮助您整理和讲述您的人生故事。请问您想从哪里开始分享呢？比如，您可以先简单介绍一下自己。',
-      }
-      
-      // 保存欢迎消息
-      const messageResponse = await fetch(`/api/interviews/${interview.id}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(welcomeMessageData),
-      })
-
-      if (!messageResponse.ok) throw new Error('创建欢迎消息失败')
-      const { message: welcomeMessage } = await messageResponse.json()
-      
-      setMessages([welcomeMessage])
-      setInput('')
-    } catch (error) {
-      console.error('Error creating interview:', error)
-      toast.error('创建访谈记录失败')
-    }
-  }
-
   // 发送消息
   const sendMessage = async () => {
-    if (!input.trim() || isLoading || !currentInterviewId) return
+    if (!input.trim() || isLoading) return
 
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user' as const,
-      content: input,
-      createdAt: new Date(),
-      interviewId: currentInterviewId,
-      isSelected: false
+    // 如果没有当前访谈 ID，创建一个新的访谈
+    if (!currentInterviewId) {
+      try {
+        const response = await fetch('/api/interviews', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: `访谈记录 ${new Date().toLocaleDateString()}`,
+          }),
+        })
+
+        if (!response.ok) throw new Error('创建访谈记录失败')
+        const { interview } = await response.json()
+        setCurrentInterviewId(interview.id)
+      } catch (error) {
+        console.error('Error creating interview:', error)
+        toast.error('创建访谈记录失败')
+        return
+      }
     }
 
-    setMessages(prev => [...prev, userMessage])
+    const userMessageData = {
+      role: 'user' as const,
+      content: input,
+    }
+
     setInput('')
     setIsLoading(true)
 
     try {
       // 保存用户消息
-      await fetch(`/api/interviews/${currentInterviewId}/messages`, {
+      const userMessageResponse = await fetch(`/api/interviews/${currentInterviewId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(userMessage),
+        body: JSON.stringify(userMessageData),
       })
+
+      if (!userMessageResponse.ok) throw new Error('保存用户消息失败')
+      const { message: userMessage } = await userMessageResponse.json()
+      setMessages(prev => [...prev, userMessage])
 
       // 获取 AI 回复
       const aiResponse = await fetch('/api/chat', {
@@ -388,28 +405,26 @@ export default function StoryEditor() {
       })
 
       if (!aiResponse.ok) {
-        throw new Error('发送消息失败')
+        throw new Error('获取 AI 回复失败')
       }
 
       const data = await aiResponse.json()
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
+      const assistantMessageData = {
         role: 'assistant' as const,
         content: data.message,
-        createdAt: new Date(),
-        interviewId: currentInterviewId,
-        isSelected: false
       }
 
       // 保存 AI 回复
-      await fetch(`/api/interviews/${currentInterviewId}/messages`, {
+      const assistantMessageResponse = await fetch(`/api/interviews/${currentInterviewId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(assistantMessage),
+        body: JSON.stringify(assistantMessageData),
       })
 
+      if (!assistantMessageResponse.ok) throw new Error('保存 AI 回复失败')
+      const { message: assistantMessage } = await assistantMessageResponse.json()
       setMessages(prev => [...prev, assistantMessage])
 
     } catch (error) {
